@@ -10,8 +10,15 @@ module ActiveMerchant #:nodoc:
       self.homepage_url = 'https://connect.squareup.com'
       self.display_name = 'Sqaure Connect'
 
-      SUPPORT_EMAIL = 'support@squareup.com'
-      STANDARD_ERROR_CODE_MAPPING = {}
+      # https://docs.connect.squareup.com/api/connect/v2/#type-errorcode
+      STANDARD_ERROR_CODE_MAPPING = {
+        'INVALID_CARD'              => STANDARD_ERROR_CODE[:invalid_number],
+        'INVALID_EXPIRATION_YEAR'   => STANDARD_ERROR_CODE[:invalid_expiry_date],
+        'CARD_EXPIRED'              => STANDARD_ERROR_CODE[:expired_card],
+        'VERIFY_CVV_FAILURE'        => STANDARD_ERROR_CODE[:incorrect_cvc],
+        'CARD_DECLINED'             => STANDARD_ERROR_CODE[:card_declined],
+        'CARD_DECLINED_CALL_ISSUER' => STANDARD_ERROR_CODE[:call_issuer],
+      }
 
       def initialize(options={})
         requires!(options, :application_id, :access_token)
@@ -19,6 +26,16 @@ module ActiveMerchant #:nodoc:
       end
 
       def purchase(money, payment, options={})
+        post[:delay_capture] = false
+        charge(money, payment, options)
+      end
+
+      def authorize(money, payment, options={})
+        post[:delay_capture] = true
+        charge(money, payment, options)
+      end
+
+      def charge(money, payment, options={})
         requires!(options, :location_id, :idempotency_key)
         post = {}
         add_invoice(post, money, options)
@@ -31,28 +48,28 @@ module ActiveMerchant #:nodoc:
         commit(:post, "locations/#{options[:location_id]}/transactions", post)
       end
 
-      def authorize(money, payment, options={})
-        post = {}
-        add_invoice(post, money, options)
-        add_payment(post, payment)
-        add_address(post, options)
-        add_customer_data(post, options)
-        add_idempotency_key(post, options)
-        add_optional_data(post, options)
-
-        commit('authonly', post)
-      end
-
       def capture(money, authorization, options={})
-        commit('capture', post)
+        requires!(options, :location_id)
+        location_id = options[:location_id]
+        commit(:post, "locations/#{location_id}/transactions/#{authorization}/capture")
       end
 
       def refund(money, authorization, options={})
-        commit('refund', post)
+        requires!(options, :location_id, :idempotency_key)
+        authorization, tender_id = authorization.split('|')
+        post                     = {}
+        post[:idempotency_key]   = options[:idempotency_key]
+        post[:tender_id]         = tender_id
+        post[:reason]            = options[:reason]
+        post[:amount_money]      = money
+        location_id              = options[:location_id]
+        commit(:post, "locations/{location_id}/transactions/{authorization}/refund", post)
       end
 
       def void(authorization, options={})
-        commit('void', post)
+        requires!(options, :location_id)
+        location_id = options[:location_id]
+        commit(:post, "locations/#{location_id}/transactions/#{authorization}/void")
       end
 
       def verify(credit_card, options={})
@@ -63,19 +80,23 @@ module ActiveMerchant #:nodoc:
       end
 
       def supports_scrubbing?
-        true
+        # TODO:
+        # true
       end
 
       def scrub(transcript)
-        transcript
+        # TODO:
+        # transcript
       end
 
       private
 
       def add_optional_data(post, options)
-        post[:reference_id]  = options[:reference_id]
-        post[:note]          = options[:note]
-        post[:delay_capture] = options[:delay_capture]
+        # customer email required for chargeback protection eligibility
+        post[:buyer_email_address] = options[:email]
+        post[:reference_id]        = options[:reference_id]
+        post[:note]                = options[:note]
+        post[:delay_capture]       = options[:delay_capture]
       end
 
       def add_idempotency_key(post, options)
@@ -127,7 +148,6 @@ module ActiveMerchant #:nodoc:
       def json_error(raw_response)
         msg = [
           'Invalid response received from the Square Connect API.',
-          "Please contact #{SUPPORT_EMAIL} if you continue to receive this message.",
           "(The raw response returned by the API was #{raw_response.inspect})"
         ].join('  ')
         {
@@ -154,8 +174,8 @@ module ActiveMerchant #:nodoc:
           message_from(response),
           response,
           authorization: authorization_from(response),
-          avs_result: AVSResult.new(code: response["some_avs_response_key"]),
-          cvv_result: CVVResult.new(response["some_cvv_response_key"]),
+          avs_result: 'I', # square doesn't return any AVS or CVV response
+          cvv_result: 'P', # so the 'I' and 'P' are hardcoded for unverified
           test: test?,
           error_code: error_code_from(response)
         )
@@ -175,17 +195,38 @@ module ActiveMerchant #:nodoc:
       end
 
       def authorization_from(response)
+        return response["error"]["charge"] unless success
+
+        response['transaction']['tenders'].map do |tender|
+          "#{tender['transaction_id']}|#{tender['id']}"
+        end.join(';')
       end
 
-      def post_data(action, parameters = {})
+      def post_data(params)
+        return nil unless params
+
+        params.map do |key, value|
+          next if value != false && value.blank?
+          if value.is_a?(Hash)
+            h = {}
+            value.each do |k, v|
+              h["#{key}[#{k}]"] = v unless v.blank?
+            end
+            post_data(h)
+          elsif value.is_a?(Array)
+            value.map { |v| "#{key}[]=#{CGI.escape(v.to_s)}" }.join("&")
+          else
+            "#{key}=#{CGI.escape(value.to_s)}"
+          end
+        end.compact.join("&")
       end
 
       def error_code_from(response)
-        unless success_from(response)
-          error = response.fetch('errors', nil)
-          # TODO: lookup error code for this response
+        unless success_from(response) && error = response['errors'][0]
+          STANDARD_ERROR_CODE_MAPPING[error['code']]
         end
       end
+
     end
   end
 end
