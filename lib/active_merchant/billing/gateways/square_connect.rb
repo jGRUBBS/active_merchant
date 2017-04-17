@@ -1,14 +1,13 @@
 module ActiveMerchant #:nodoc:
   module Billing #:nodoc:
     class SquareConnectGateway < Gateway
-      self.live_url = 'https://connect.squareup.com/v2'
-
+      self.live_url            = 'https://connect.squareup.com/v2'
       self.supported_countries = ['US']
       self.default_currency    = 'USD'
+      self.money_format        = :cents
       self.supported_cardtypes = [:visa, :master, :american_express, :discover]
-
-      self.homepage_url = 'https://connect.squareup.com'
-      self.display_name = 'Sqaure Connect'
+      self.homepage_url        = 'https://squareup.com/developers'
+      self.display_name        = 'Sqaure Connect'
 
       # https://docs.connect.squareup.com/api/connect/v2/#type-errorcode
       STANDARD_ERROR_CODE_MAPPING = {
@@ -20,23 +19,27 @@ module ActiveMerchant #:nodoc:
         'CARD_DECLINED_CALL_ISSUER' => STANDARD_ERROR_CODE[:call_issuer],
       }
 
-      def initialize(options={})
-        requires!(options, :application_id, :access_token)
+      def initialize(options = {})
+        requires!(options, :application_id, :access_token, :location_id)
         super
       end
 
-      def purchase(money, payment, options={})
-        post[:delay_capture] = false
+      def location_id
+        @options[:location_id]
+      end
+
+      def purchase(money, payment, options = {})
+        options[:delay_capture] = false
         charge(money, payment, options)
       end
 
-      def authorize(money, payment, options={})
-        post[:delay_capture] = true
+      def authorize(money, payment, options = {})
+        options[:delay_capture] = true
         charge(money, payment, options)
       end
 
-      def charge(money, payment, options={})
-        requires!(options, :location_id, :idempotency_key)
+      def charge(money, payment, options = {})
+        requires!(options, :idempotency_key)
         post = {}
         add_invoice(post, money, options)
         add_payment(post, payment)
@@ -45,34 +48,37 @@ module ActiveMerchant #:nodoc:
         add_idempotency_key(post, options)
         add_optional_data(post, options)
 
-        commit(:post, "locations/#{options[:location_id]}/transactions", post)
+        commit(:post, "locations/#{location_id}/transactions", post)
       end
 
-      def capture(money, authorization, options={})
-        requires!(options, :location_id)
-        location_id = options[:location_id]
-        commit(:post, "locations/#{location_id}/transactions/#{authorization}/capture")
+      def capture(money, authorization, options = {})
+        authorization, tender_id = authorization.split('|')
+        authorization = authorization || 'null'
+        path = "locations/#{location_id}/transactions/#{authorization}/capture"
+        commit(:post, path)
       end
 
-      def refund(money, authorization, options={})
-        requires!(options, :location_id, :idempotency_key)
+      def refund(money, authorization, options = {})
+        requires!(options, :idempotency_key)
         authorization, tender_id = authorization.split('|')
         post                     = {}
         post[:idempotency_key]   = options[:idempotency_key]
         post[:tender_id]         = tender_id
         post[:reason]            = options[:reason]
-        post[:amount_money]      = money
-        location_id              = options[:location_id]
-        commit(:post, "locations/{location_id}/transactions/{authorization}/refund", post)
+        add_invoice(post, money, options)
+        authorization = authorization || 'null'
+        path = "locations/#{location_id}/transactions/#{authorization}/refund"
+        commit(:post, path, post)
       end
 
-      def void(authorization, options={})
-        requires!(options, :location_id)
-        location_id = options[:location_id]
-        commit(:post, "locations/#{location_id}/transactions/#{authorization}/void")
+      def void(authorization, options = {})
+        authorization, tender_id = authorization.split('|')
+        authorization = authorization || 'null'
+        path = "locations/#{location_id}/transactions/#{authorization}/void"
+        commit(:post, path)
       end
 
-      def verify(credit_card, options={})
+      def verify(credit_card, options = {})
         MultiResponse.run(:use_first_response) do |r|
           r.process { authorize(100, credit_card, options) }
           r.process(:ignore_result) { void(r.authorization, options) }
@@ -80,13 +86,14 @@ module ActiveMerchant #:nodoc:
       end
 
       def supports_scrubbing?
-        # TODO:
-        # true
+        true
       end
 
       def scrub(transcript)
-        # TODO:
-        # transcript
+        transcript.
+          gsub(%r((\\\"card_nonce\\\":\\\")[\w|\D]{30}), '\1[FILTERED]').
+          gsub(%r((Authorization: Bearer )[\S]{#{token_size}}), '\1[FILTERED]').
+          gsub(%r((\/locations\/)[a-zA-Z\d]{30}), '\1[FILTERED]')
       end
 
       private
@@ -123,7 +130,7 @@ module ActiveMerchant #:nodoc:
 
       def add_invoice(post, money, options)
         post[:amount_money] = {
-          amount:   amount(money),
+          amount:   amount(money).to_i,
           currency: options[:currency] || currency(money)
         }
       end
@@ -134,15 +141,14 @@ module ActiveMerchant #:nodoc:
 
       def headers(options)
         {
-          "Authorization" => "Bearer #{access_token[:access_token]}",
-          "Content-Type"  => "application/json"
+          "Authorization" => "Bearer #{@options[:access_token]}"
         }
       end
 
       def parse(body)
         JSON.parse(body)
       rescue JSON::ParserError
-        json_error(raw_response)
+        json_error(body)
       end
 
       def json_error(raw_response)
@@ -151,9 +157,12 @@ module ActiveMerchant #:nodoc:
           "(The raw response returned by the API was #{raw_response.inspect})"
         ].join('  ')
         {
-          "error" => {
-            "message" => msg
-          }
+          'errors' => [
+            {
+              'category' => 'INVALID_REQUEST_ERROR',
+              'detail'   => msg
+            }
+          ]
         }
       end
 
@@ -167,22 +176,38 @@ module ActiveMerchant #:nodoc:
       end
 
       def commit(method, endpoint, parameters = nil, options = {})
-        response = api_request(method, url, parameters, options)
+        response = api_request(method, endpoint, parameters, options)
 
         Response.new(
           success_from(response),
           message_from(response),
           response,
           authorization: authorization_from(response),
-          avs_result: 'I', # square doesn't return any AVS or CVV response
-          cvv_result: 'P', # so the 'I' and 'P' are hardcoded for unverified
-          test: test?,
-          error_code: error_code_from(response)
+          avs_result:    avs_result,
+          cvv_result:    cvv_result,
+          test:          test?,
+          error_code:    error_code_from(response)
         )
+      end
+
+      def avs_result
+        # the response doesn't include AVS, so the 'I' is hardcoded for
+        # unverified
+        { code: 'I' }
+      end
+
+      def cvv_result
+        # the response doesn't include CVV, so the 'I' is hardcoded for
+        # unverified
+        'P'
       end
 
       def success_from(response)
         !response.key?('errors')
+      end
+
+      def token_size
+        @options[:access_token].size
       end
 
       def message_from(response)
@@ -195,7 +220,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def authorization_from(response)
-        return response["error"]["charge"] unless success
+        return nil unless success_from(response) && response['transaction']
 
         response['transaction']['tenders'].map do |tender|
           "#{tender['transaction_id']}|#{tender['id']}"
@@ -204,25 +229,13 @@ module ActiveMerchant #:nodoc:
 
       def post_data(params)
         return nil unless params
-
-        params.map do |key, value|
-          next if value != false && value.blank?
-          if value.is_a?(Hash)
-            h = {}
-            value.each do |k, v|
-              h["#{key}[#{k}]"] = v unless v.blank?
-            end
-            post_data(h)
-          elsif value.is_a?(Array)
-            value.map { |v| "#{key}[]=#{CGI.escape(v.to_s)}" }.join("&")
-          else
-            "#{key}=#{CGI.escape(value.to_s)}"
-          end
-        end.compact.join("&")
+        params.to_json
       end
 
       def error_code_from(response)
-        unless success_from(response) && error = response['errors'][0]
+        return if success_from(response)
+        error = response['errors'][0]
+        if error.present?
           STANDARD_ERROR_CODE_MAPPING[error['code']]
         end
       end
