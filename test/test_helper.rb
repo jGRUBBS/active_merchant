@@ -10,7 +10,6 @@ require 'yaml'
 require 'json'
 require 'active_merchant'
 require 'comm_stub'
-require 'square_connect_card_nonce'
 
 require 'active_support/core_ext/integer/time'
 require 'active_support/core_ext/numeric/time'
@@ -264,10 +263,6 @@ module ActiveMerchant
 
       hash.symbolize_keys!
       hash.each{|k,v| symbolize_keys(v)}
-    end
-
-    def square_card_nonce
-      SquareConnectCardNonce.nonce
     end
   end
 end

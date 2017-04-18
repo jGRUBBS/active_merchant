@@ -1,6 +1,20 @@
 require 'test_helper'
+require 'square_connect/card_nonce'
 
 class RemoteSquareConnectTest < Test::Unit::TestCase
+
+  def self.startup
+    start_square_connect_server
+  end
+
+  def self.shutdown
+    stop_square_connect_server
+  end
+
+  def square_card_nonce
+    SquareConnectCardNonce.nonce
+  end
+
   def setup
     @gateway = SquareConnectGateway.new(fixtures(:square_connect))
 

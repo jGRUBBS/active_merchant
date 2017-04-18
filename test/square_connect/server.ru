@@ -7,8 +7,8 @@ use Rack::ContentLength
 
 app = Rack::Builder.app do
   use Rack::CommonLogger
-  file_path   = Dir.pwd + '/index.html.erb'
-  config_path = Dir.pwd + '/test/fixtures.yml'
+  file_path   = "#{Dir.pwd}/test/square_connect/index.html.erb"
+  config_path = "#{Dir.pwd}/test/fixtures.yml"
   template    = File.read(file_path)
   config      = YAML.load(File.read(config_path))['square_connect']
   @app_id     = config['application_id']
