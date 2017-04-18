@@ -26,19 +26,30 @@ Capybara.app_host       = 'http://localhost:8000/'
 module SquareConnectCardNonce
   extend Capybara::DSL
 
-  def self.nonce
+  def self.default_options
+    {
+      number:      '4532 7597 3454 5858',
+      cvv:         '111',
+      exp_mo:      '01',
+      exp_yr:      '19',
+      postal_code: '94103'
+    }
+  end
+
+  def self.nonce(options = {})
+    options = default_options.merge(options)
     visit('/')
     within_frame('sq-card-number') do
-      find(:css, "input").set('4532 7597 3454 5858')
+      find(:css, "input").set(options[:number])
     end
     within_frame('sq-cvv') do
-      find(:css, "input").set('111')
+      find(:css, "input").set(options[:cvv])
     end
     within_frame('sq-expiration-date') do
-      find(:css, "input").set('0119')
+      find(:css, "input").set("#{options[:exp_mo]}#{options[:exp_yr]}")
     end
     within_frame('sq-postal-code') do
-      find(:css, "input").set('94103')
+      find(:css, "input").set(options[:postal_code])
     end
     find('input[type="submit"]').click
 

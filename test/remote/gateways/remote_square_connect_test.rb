@@ -11,8 +11,8 @@ class RemoteSquareConnectTest < Test::Unit::TestCase
     stop_square_connect_server
   end
 
-  def square_card_nonce
-    SquareConnectCardNonce.nonce
+  def square_card_nonce(options = {})
+    SquareConnectCardNonce.nonce(options)
   end
 
   def setup
@@ -47,6 +47,18 @@ class RemoteSquareConnectTest < Test::Unit::TestCase
       'INVALID_REQUEST_ERROR: Invalid response received from the Square Connect',
       'API.  (The raw response returned by the API was "")'
     ].join(' ')
+    @cvv_error = %w{
+      PAYMENT_METHOD_ERROR: Card verification code check failed.
+    }.join(' ')
+    @postal_code_error = %w{
+      PAYMENT_METHOD_ERROR: Postal code check failed.
+    }.join(' ')
+    @invalid_expiration = %w{
+      PAYMENT_METHOD_ERROR: Invalid card expiration date.
+    }.join(' ')
+    @card_declined = %w{
+      PAYMENT_METHOD_ERROR: Card declined.
+    }.join(' ')
     @authentication_error = %w{
       AUTHENTICATION_ERROR: The `Authorization` http header of your request was
       malformed. The header value is expected to be of the format "Bearer TOKEN"
@@ -78,9 +90,9 @@ class RemoteSquareConnectTest < Test::Unit::TestCase
   end
 
   def test_failed_purchase
-    response = @gateway.purchase(@amount, @declined_card, @options)
+    response = @gateway.purchase(403, square_card_nonce, @options)
     assert_failure response
-    assert_match @nonce_not_found_msg, response.message
+    assert_equal @card_declined, response.message
   end
 
   def test_successful_authorize_and_capture
@@ -93,9 +105,10 @@ class RemoteSquareConnectTest < Test::Unit::TestCase
   end
 
   def test_failed_authorize
-    response = @gateway.authorize(@amount, @declined_card, @options)
+    nonce    = square_card_nonce(cvv: '911')
+    response = @gateway.authorize(@amount, nonce, @options)
     assert_failure response
-    assert_equal @nonce_not_found_msg, response.message
+    assert_equal @cvv_error, response.message
   end
 
   def test_failed_capture

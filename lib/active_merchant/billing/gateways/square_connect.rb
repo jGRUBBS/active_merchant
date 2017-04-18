@@ -13,8 +13,10 @@ module ActiveMerchant #:nodoc:
       STANDARD_ERROR_CODE_MAPPING = {
         'INVALID_CARD'              => STANDARD_ERROR_CODE[:invalid_number],
         'INVALID_EXPIRATION_YEAR'   => STANDARD_ERROR_CODE[:invalid_expiry_date],
+        'INVALID_EXPIRATION'        => STANDARD_ERROR_CODE[:invalid_expiry_date],
         'CARD_EXPIRED'              => STANDARD_ERROR_CODE[:expired_card],
         'VERIFY_CVV_FAILURE'        => STANDARD_ERROR_CODE[:incorrect_cvc],
+        'VERIFY_AVS_FAILURE'        => STANDARD_ERROR_CODE[:incorrect_zip],
         'CARD_DECLINED'             => STANDARD_ERROR_CODE[:card_declined],
         'CARD_DECLINED_CALL_ISSUER' => STANDARD_ERROR_CODE[:call_issuer],
       }
