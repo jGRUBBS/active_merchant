@@ -113,7 +113,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def add_customer_data(post, options)
-        post[:customer_id] = options[:customer_id]
+        post[:customer_id] = options[:customer_id].to_s
       end
 
       def add_address(post, options)
@@ -195,13 +195,13 @@ module ActiveMerchant #:nodoc:
       def avs_result
         # the response doesn't include AVS, so the 'I' is hardcoded for
         # unverified
-        { code: 'I' }
+        { code: 'D' }
       end
 
       def cvv_result
         # the response doesn't include CVV, so the 'I' is hardcoded for
         # unverified
-        'P'
+        'M'
       end
 
       def success_from(response)
