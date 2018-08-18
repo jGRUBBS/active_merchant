@@ -113,6 +113,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def add_customer_data(post, options)
+        return unless options[:customer_id].present?
         post[:customer_id] = options[:customer_id].to_s
       end
 
@@ -222,6 +223,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def authorization_from(response)
+        # FIXME: need to get tender['id'] from credit (refund) response
         return nil unless success_from(response) && response['transaction']
 
         response['transaction']['tenders'].map do |tender|
